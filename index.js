@@ -1,3 +1,5 @@
+"use strict";
+
 var crypto = require('crypto'),
 	util = require('util');
 
@@ -74,9 +76,14 @@ function parse(modules) {
 		roots = [];
 	
 	modules.forEach(function (module) {
-		map[module.id] = map[module.id] ? 'internal' : 'root'
+		map[module.id] = map[module.id] ? 'internal' : 'root';
+		
 		module.dependencies.forEach(function (id) {
-			map[id] = map[id] ? 'internal' : 'external';
+			if (!map[id]) {
+				map[id] = 'external';
+			} else if (map[id] !== 'external') {
+				map[id] = 'internal';
+			}
 		});
 	});
 	
