@@ -1,20 +1,42 @@
-libc
-========
+# libc
 
-Convert AMD bundle to standard JavaScript, or nearly standard JavaScript.
+将CMD(SeaJS)模块转换为可自运行的代码。
 
----
+## 原理
 
-### Install
+假设有以下一个`bundle.js`，其中包含若干CMD模块：
+
+	define('c', [ ], function (require, exports, module) {
+		var x = require('x');
+		exports.value = x.value;
+	});
+	define('b', [ 'c' ], function (require, exports, module) {
+		var c = require('c');
+		exports.value = c.value;
+	});
+	define('a', [ 'b' ], function (require, exports, module) {
+		var b = require('b');
+		exports.value = b.value;
+	});
+
+通过`libc`的`compact`模式转换后，成为以下形态：
+
+	(function () {
+		var $c = function () {
+			var exports = {}, module = { exports: exports };
+		};
+	}());
+
+## 安装
 
 	$npm install libc
-	
+
 ### Usage
 
 	var clean = require('libc');
 	
 	clean(code, options);
-	
+
 + `options.mode` : string
 
 	"standalone" or "compact".

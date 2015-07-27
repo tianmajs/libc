@@ -1,26 +1,29 @@
 "use strict";
 
-var crypto = require('crypto'),
-	util = require('util');
+var	util = require('util');
 
-var PATTERN_REQUIRE = /(^|[^\.])\brequire\s*\(\s*['"]([^'"]+?)['"]\s*\)/g,
-
-	PATTERN_FN = /^\s*function.*?\{([\s\S]*)\}\s*$/,
-	
-	PATTERN_ILLEGAL = /[^\w]/g;
+var PATTERN_REQUIRE = /(^|[^\.])\brequire\s*\(\s*['"]([^'"]+?)['"]\s*\)/g;
+var PATTERN_FN = /^\s*function.*?\{([\s\S]*)\}\s*$/;
+var PATTERN_ILLEGAL = /[^\w]/g;
 
 var TEMPLATE_FN = [
 	'var %s = function () {',
 		'var exports = {}, module = { exports: exports };',
 		'%s',
+		'%s = function () { return module.exports; };',
 		'return module.exports;',
-	'}();'
+	'};'
 ].join('\n');
 
-var TEMPLATE_AMD = [
-	'define("%s", [ %s ], function (require, exports, module) {',
-		'%s',
-	'});'
+var TEMPLATE_REQUIRE = [
+	'window.require = function (require) {',
+	'    var modules = {',
+	'        %s',
+	'    };',
+	'    return function (id) {',
+	'        return modules[id] ? modules[id]() : (require ? require(id) : null);',
+	'    };',
+	'}(window.require);'
 ].join('\n');
 
 var TEMPLATE_WRAPPER = [
@@ -30,7 +33,7 @@ var TEMPLATE_WRAPPER = [
 ].join('\n');
 
 /**
- * Convert module id to a auto-variable name.
+ * Convert module id to an automatic name.
  * @param id {string}
  * @return {string}
  */
@@ -39,41 +42,14 @@ function $(id) {
 }
 
 /**
- * Calculate HASH value of input string.
- * @param str {string}
- * @return {string}
- */
-function hash(str) {
-	return crypto.createHash('sha1')
-		.update(str, 'binary')
-		.digest('hex');
-}
-
-/**
- * Convert AMD module to self-run function.
- * @param module {Object}
- * @return {string}
- */
-function transform(module) {
-	var id = $(module.id),
-		
-		code = module.code
-			.replace(PATTERN_REQUIRE, function (all, prefix, id) {
-				return prefix + $(id);
-			});
-
-	return util.format(TEMPLATE_FN, id, code);
-}
-
-/**
  * Parse module dependencies tree.
  * @param module {Array}
  * @return {Object}
  */
 function parse(modules) {
-	var map = {},
-		externals = [],
-		roots = [];
+	var map = {};
+	var externals = [];
+	var roots = [];
 	
 	modules.forEach(function (module) {
 		map[module.id] = map[module.id] ? 'internal' : 'root';
@@ -90,9 +66,11 @@ function parse(modules) {
 	Object.keys(map).forEach(function (id) {
 		switch (map[id]) {
 		case 'root':
+			roots[id] = true;
 			roots.push(id);
 			break;
 		case 'external':
+			externals[id] = true;
 			externals.push(id);
 			break;
 		}
@@ -105,80 +83,7 @@ function parse(modules) {
 }
 
 /**
- * Compact a single-interface bundle.
- * @param root {string}
- * @param externals {Array}
- * @param code {string}
- * @return {string}
- */
-function simple(root, externals, code) {
-	return util.format(TEMPLATE_AMD,
-		
-		root,
-		
-		externals.map(function (id) {
-			return '"' + id + '"';
-		}).join(', '),
-		
-		[
-			externals.map(function (id) {
-				return 'var ' + $(id) + ' = require("' + id + '");';
-			}).join('\n'),
-			
-			code,
-			
-			'module.exports = ' + $(root) + ';'
-		].join('\n')
-	);
-}
-
-/**
- * Compact a multiple-interfaces bundle.
- * @param roots {Array}
- * @param externals {Array}
- * @param code {string}
- * @return {string}
- */
-function complex(roots, externals, code) {
-	var bundleId = hash(code);
-
-	var output = [
-		util.format(TEMPLATE_AMD,
-			bundleId,
-			
-			externals.map(function (id) {
-				return '"' + id + '"';
-			}).join(', '),
-			
-			[
-				externals.map(function (id) {
-					return 'var ' + $(id) + ' = require("' + id + '");';
-				}).join('\n'),
-				
-				code,
-				
-				roots.map(function (id) {
-					return 'exports.' + $(id) + ' = ' + $(id) + ';';
-				}).join('\n')
-			].join('\n')
-		)
-	];
-	
-	roots.forEach(function (id) {
-		output.push(util.format(TEMPLATE_AMD,
-			id,
-			
-			'"' + bundleId + '"',
-			
-			'module.exports = require("' + bundleId + '").' + $(id)
-		));
-	});
-	
-	return output.join('\n');
-}
-
-/**
- * Split an AMD bundle.
+ * Split an AMD bundle into separate modules.
  * @param code {string}
  * @return {Array}
  */
@@ -191,39 +96,71 @@ function split(code) {
 			dependencies: deps,
 			code: fn.toString().match(PATTERN_FN)[1]
 		});
+		queue[id] = queue[queue.length - 1];
 	});
 	
 	return queue;
 }
 
 /**
- * Convert an AMD bundle.
+ * Repackage CommonJS modules into function form.
+ * @param modules {Array}
+ * @param externals {Object}
+ * @return {string}
+ */
+function transform(modules, externals) {
+	return modules.map(function (module) {
+		var id = module.id;
+
+		var dependencies =
+			module.dependencies.filter(function (id) {
+				return externals[id];
+			});
+
+		var code =
+			module.code.replace(PATTERN_REQUIRE, function (all, prefix, id) {
+				return externals[id] ?
+					all : prefix + $(id) + '()';
+			});
+
+		return util.format(TEMPLATE_FN, $(id), code, $(id));
+	}).join('\n');
+}
+
+/**
+ * Convert an AMD bundle to self-run code.
  * @param code {string}
  * @param [options] {Object|string}
  * @return {string}
  */
-module.exports = function (code, options) {
-	var modules = split(code),
-		tree, entries;
-		
-	if (typeof options === 'string') {
-		options = {
-			mode: options
-		};
+module.exports = function (code, options) {		
+	options = options || {};
+
+	var modules = split(code);
+	var exports = (options.exports || []).filter(function (id) {
+		return modules[id];
+	});
+	var tree = parse(modules);
+
+	code = [ transform(modules, tree.externals) ];
+
+	// Supply a global require function to export some modules.
+	if (exports.length > 0) {
+		code.push(util.format(
+			TEMPLATE_REQUIRE,
+			exports.map(function (id) {
+				return '"' + id + '" : ' + $(id)
+			}).join(', ')
+		));
 	}
-		
-	code = modules.map(transform).join('\n');
-	
-	switch (options.mode || 'standalone') {
-	case 'standalone':
-		return util.format(TEMPLATE_WRAPPER, code);
-	case 'compact':
-		tree = parse(modules);
-		entries = options.entries || tree.roots;
-		if (entries.length > 1) {
-			return complex(entries, tree.externals, code);
-		} else {
-			return simple(entries[0], tree.externals, code);
+
+	// Make unexported entry modules self-run.
+	tree.roots.forEach(function (id) {
+		if (exports.indexOf(id) === -1) {
+			code.push($(id) + '();');
 		}
-	}
+	});
+
+	// Wrap all code in a function scope.
+	return util.format(TEMPLATE_WRAPPER, code.join('\n'));
 };

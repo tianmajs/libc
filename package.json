@@ -1,5 +1,25 @@
 {
-	"name": "libc",
-	"version": "0.9.1",
-	"main": "index.js"
+    "name": "libc",
+    "description": "Simplify the AMD bundle",
+    "version": "1.0.0-b0",
+    "author": "Nanqiao Deng <nqdeng@gmail.com>",
+    "keywords": [
+        "commandjs",
+        "amdclean"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/tianmajs/libc.git"
+    },
+    "license": "MIT",
+    "devDependencies": {
+        "mocha": "~2.2.5"
+    },
+    "engines": {
+        "node": ">=0.12.0"
+    },
+    "main": "index.js",
+    "scripts": {
+        "test": "mocha --harmony"
+    }
 }
